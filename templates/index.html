@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Inventory Scanner</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; color: #333; }
+.header { background: #1a73e8; color: #fff; padding: 14px 16px; display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; z-index: 10; }
+.header h1 { font-size: 18px; font-weight: 600; }
+.tab-bar { display: flex; background: #fff; border-bottom: 1px solid #ddd; }
+.tab { flex: 1; text-align: center; padding: 12px; font-size: 14px; font-weight: 500; color: #666; cursor: pointer; border-bottom: 2px solid transparent; }
+.tab.active { color: #1a73e8; border-bottom-color: #1a73e8; }
+.view { display: none; padding: 16px; }
+.view.active { display: block; }
+
+/* Scan view */
+.capture-area { background: #fff; border-radius: 12px; padding: 20px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+.capture-btn { display: inline-block; background: #1a73e8; color: #fff; padding: 14px 32px; border-radius: 8px; font-size: 16px; border: none; cursor: pointer; margin: 8px; }
+.capture-btn:active { background: #1557b0; }
+.capture-btn.secondary { background: #fff; color: #1a73e8; border: 2px solid #1a73e8; }
+#preview { max-width: 100%; border-radius: 8px; margin-top: 12px; display: none; }
+#loading { display: none; margin: 20px auto; text-align: center; }
+.spinner { width: 40px; height: 40px; border: 4px solid #ddd; border-top-color: #1a73e8; border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto 10px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Form */
+.form-section { margin-top: 16px; }
+.form-section h3 { font-size: 14px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px solid #eee; }
+.field { margin-bottom: 12px; }
+.field label { display: block; font-size: 12px; color: #666; margin-bottom: 4px; font-weight: 500; }
+.field input { width: 100%; padding: 10px 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 15px; background: #fff; }
+.field input:focus { outline: none; border-color: #1a73e8; box-shadow: 0 0 0 2px rgba(26,115,232,0.2); }
+.save-btn { width: 100%; padding: 14px; background: #34a853; color: #fff; border: none; border-radius: 8px; font-size: 16px; font-weight: 600; cursor: pointer; margin-top: 12px; }
+.save-btn:active { background: #2d8e47; }
+.save-btn:disabled { background: #ccc; }
+
+/* Inventory list */
+.inv-card { background: #fff; border-radius: 10px; padding: 14px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+.inv-card .title { font-weight: 600; font-size: 15px; margin-bottom: 4px; }
+.inv-card .meta { font-size: 12px; color: #888; }
+.inv-card .details { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; margin-top: 8px; font-size: 13px; }
+.inv-card .details span { color: #666; }
+.inv-card .details strong { color: #333; }
+.inv-card .actions { margin-top: 8px; text-align: right; }
+.del-btn { background: none; border: none; color: #d93025; font-size: 13px; cursor: pointer; padding: 4px 8px; }
+.empty { text-align: center; color: #999; padding: 40px 0; }
+.toast { position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%); background: #333; color: #fff; padding: 10px 24px; border-radius: 20px; font-size: 14px; z-index: 100; display: none; }
+.badge { background: #d93025; color: #fff; font-size: 10px; padding: 2px 6px; border-radius: 4px; margin-left: 4px; }
+.shelf-warn { color: #d93025; font-weight: 600; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>Inventory Scanner</h1>
+  <span id="count-badge"></span>
+</div>
+
+<div class="tab-bar">
+  <div class="tab active" data-view="scan">Scan</div>
+  <div class="tab" data-view="inventory">Inventory</div>
+</div>
+
+<div id="scan" class="view active">
+  <div class="capture-area">
+    <p style="color:#888; margin-bottom:12px;">Point camera at a product label</p>
+
+    <!-- Live camera view -->
+    <div id="live-camera" style="display:none; position:relative;">
+      <video id="video" autoplay playsinline muted style="width:100%; border-radius:8px;"></video>
+      <canvas id="analysis-canvas" style="display:none;"></canvas>
+      <div id="quality-bar" style="position:absolute; bottom:12px; left:12px; right:12px; height:6px; background:rgba(0,0,0,0.3); border-radius:3px; overflow:hidden;">
+        <div id="quality-fill" style="height:100%; width:0%; background:#34a853; border-radius:3px; transition: width 0.2s, background 0.2s;"></div>
+      </div>
+      <div id="quality-label" style="position:absolute; bottom:24px; left:50%; transform:translateX(-50%); background:rgba(0,0,0,0.6); color:#fff; padding:4px 12px; border-radius:12px; font-size:12px;">Searching for label...</div>
+      <div id="auto-capture-flash" style="display:none; position:absolute; inset:0; background:#fff; border-radius:8px; opacity:0.8;"></div>
+    </div>
+
+    <div id="camera-buttons">
+      <button class="capture-btn" onclick="startLiveCamera()">Auto Scan</button>
+      <button class="capture-btn secondary" onclick="document.getElementById('camera').click()">Manual</button>
+      <button class="capture-btn secondary" onclick="document.getElementById('galleryInput').click()">Gallery</button>
+    </div>
+    <div id="live-controls" style="display:none; margin-top:12px;">
+      <button class="capture-btn" onclick="manualSnap()">Capture Now</button>
+      <button class="capture-btn secondary" onclick="stopLiveCamera()">Cancel</button>
+    </div>
+
+    <input type="file" id="camera" accept="image/*" capture="environment" style="display:none">
+    <input type="file" id="galleryInput" accept="image/*" style="display:none">
+    <img id="preview">
+  </div>
+  <div id="loading"><div class="spinner"></div><p>Reading label...</p></div>
+  <div id="form-container" style="display:none">
+    <div class="form-section">
+      <h3>Location</h3>
+      <div class="field"><label>Location</label><input id="f-location"></div>
+      <div class="field"><label>State</label><input id="f-state"></div>
+      <div class="field"><label>Type</label><input id="f-type"></div>
+      <div class="field"><label>Location Code</label><input id="f-location_code"></div>
+    </div>
+    <div class="form-section">
+      <h3>Product</h3>
+      <div class="field"><label>Brand</label><input id="f-brand"></div>
+      <div class="field"><label>Pack</label><input id="f-pack"></div>
+      <div class="field"><label>SKU</label><input id="f-sku"></div>
+      <div class="field"><label>Item Code</label><input id="f-item_code"></div>
+      <div class="field"><label>Variant Code</label><input id="f-vareiant_code"></div>
+      <div class="field"><label>Description</label><input id="f-description"></div>
+      <div class="field"><label>MSKU Description</label><input id="f-msku_description"></div>
+      <div class="field"><label>Category</label><input id="f-category"></div>
+    </div>
+    <div class="form-section">
+      <h3>Batch & Dates</h3>
+      <div class="field"><label>Batch Number</label><input id="f-batch_number"></div>
+      <div class="field"><label>DOM (Date of Manufacture)</label><input id="f-dom"></div>
+      <div class="field"><label>Shelf Life (days)</label><input id="f-shelf_life" type="number"></div>
+      <div class="field"><label>BBD (Best Before Date)</label><input id="f-bbd"></div>
+      <div class="field"><label>Today Date</label><input id="f-today_date" readonly></div>
+      <div class="field"><label>Remaining Shelf Life (days)</label><input id="f-remaining_shelf_life" type="number"></div>
+      <div class="field"><label>Shelf Life %</label><input id="f-shelf_life_pct"></div>
+      <div class="field"><label>BBND</label><input id="f-bbnd"></div>
+    </div>
+    <div class="form-section">
+      <h3>Stock</h3>
+      <div class="field"><label>Stock in Hand (Physical Qty)</label><input id="f-stock_in_hand" type="number"></div>
+      <div class="field"><label>Total Stocks</label><input id="f-total_stocks" type="number"></div>
+      <div class="field"><label>Outward Yesterday</label><input id="f-outward_yesterday" type="number"></div>
+      <div class="field"><label>MTD Sale</label><input id="f-mtd_sale" type="number"></div>
+      <div class="field"><label>Week Sale</label><input id="f-week_sale" type="number"></div>
+    </div>
+    <button class="save-btn" id="save-btn" onclick="saveRecord()">Save to Inventory</button>
+  </div>
+</div>
+
+<div id="inventory" class="view">
+  <div id="inv-list"></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const FIELDS = [
+  "location","state","type","location_code","brand","pack","sku","item_code",
+  "vareiant_code","description","batch_number","stock_in_hand","total_stocks",
+  "dom","shelf_life","bbd","today_date","remaining_shelf_life","shelf_life_pct",
+  "outward_yesterday","mtd_sale","week_sale","bbnd","msku_description","category"
+];
+
+let currentImageB64 = null;
+let videoStream = null;
+let analysisInterval = null;
+let sharpnessHistory = [];
+const SHARPNESS_THRESHOLD = 50;      // minimum sharpness to consider "good"
+const STABLE_FRAMES_NEEDED = 8;      // consecutive good frames before auto-snap
+const ANALYSIS_INTERVAL_MS = 200;    // check every 200ms
+
+// Tab switching
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+    tab.classList.add('active');
+    document.getElementById(tab.dataset.view).classList.add('active');
+    if (tab.dataset.view === 'inventory') loadInventory();
+  });
+});
+
+// Camera & gallery handlers
+document.getElementById('camera').addEventListener('change', handleImage);
+document.getElementById('galleryInput').addEventListener('change', handleImage);
+
+function handleImage(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function(ev) {
+    compressImage(ev.target.result, function(compressed) {
+      const img = document.getElementById('preview');
+      img.src = compressed;
+      img.style.display = 'block';
+      currentImageB64 = compressed;
+      extractLabel(compressed);
+    }, 2400, 0.92);
+  };
+  reader.readAsDataURL(file);
+}
+
+function compressImage(dataUrl, callback, maxWidth, quality) {
+  maxWidth = maxWidth || 2400;
+  quality = quality || 0.92;
+  const img = new Image();
+  img.onload = function() {
+    let w = img.width, h = img.height;
+    if (w > maxWidth) { h = Math.round(h * maxWidth / w); w = maxWidth; }
+    const canvas = document.createElement('canvas');
+    canvas.width = w; canvas.height = h;
+    canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+    let result = canvas.toDataURL('image/jpeg', quality);
+    // If still over ~8MB, compress slightly
+    if (result.length > 8 * 1024 * 1024) {
+      result = canvas.toDataURL('image/jpeg', 0.7);
+    }
+    callback(result);
+  };
+  img.src = dataUrl;
+}
+
+async function extractLabel(imageData) {
+  document.getElementById('loading').style.display = 'block';
+  document.getElementById('form-container').style.display = 'none';
+  try {
+    const resp = await fetch('/api/extract', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({image: imageData})
+    });
+    const data = await resp.json();
+    if (data.error) {
+      showToast('Error: ' + data.error);
+      return;
+    }
+    populateForm(data);
+    document.getElementById('form-container').style.display = 'block';
+  } catch (err) {
+    showToast('Network error');
+  } finally {
+    document.getElementById('loading').style.display = 'none';
+  }
+}
+
+function populateForm(data) {
+  FIELDS.forEach(f => {
+    const el = document.getElementById('f-' + f);
+    if (el) el.value = data[f] || '';
+  });
+}
+
+async function saveRecord() {
+  const btn = document.getElementById('save-btn');
+  btn.disabled = true;
+  const record = {};
+  FIELDS.forEach(f => {
+    record[f] = document.getElementById('f-' + f).value || null;
+  });
+  // Store a small thumbnail, not the full image
+  record.photo_b64 = currentImageB64 ? currentImageB64.substring(0, 200) + '...' : null;
+
+  try {
+    const resp = await fetch('/api/save', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(record)
+    });
+    const data = await resp.json();
+    if (data.status === 'saved') {
+      showToast('Saved!');
+      // Reset
+      document.getElementById('form-container').style.display = 'none';
+      document.getElementById('preview').style.display = 'none';
+      currentImageB64 = null;
+      document.getElementById('camera').value = '';
+      document.getElementById('galleryInput').value = '';
+    }
+  } catch (err) {
+    showToast('Save failed');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function loadInventory() {
+  const list = document.getElementById('inv-list');
+  list.innerHTML = '<div class="empty">Loading...</div>';
+  try {
+    const resp = await fetch('/api/inventory');
+    const items = await resp.json();
+    document.getElementById('count-badge').innerHTML = items.length ? `<span class="badge">${items.length}</span>` : '';
+    if (!items.length) {
+      list.innerHTML = '<div class="empty">No items yet. Scan a label to get started.</div>';
+      return;
+    }
+    list.innerHTML = items.map(item => `
+      <div class="inv-card">
+        <div class="title">${item.description || item.msku_description || 'Unknown Product'}</div>
+        <div class="meta">${item.batch_number || ''} | ${item.created_at || ''}</div>
+        <div class="details">
+          <div><span>Location:</span> <strong>${item.location || '-'}</strong></div>
+          <div><span>SKU:</span> <strong>${item.sku || '-'}</strong></div>
+          <div><span>Item Code:</span> <strong>${item.item_code || '-'}</strong></div>
+          <div><span>Variant:</span> <strong>${item.vareiant_code || '-'}</strong></div>
+          <div><span>DOM:</span> <strong>${item.dom || '-'}</strong></div>
+          <div><span>BBD:</span> <strong>${item.bbd || '-'}</strong></div>
+          <div><span>Shelf Life:</span> <strong>${item.remaining_shelf_life || '-'} days</strong></div>
+          <div><span>Shelf %:</span> <strong class="${parseInt(item.shelf_life_pct) < 30 ? 'shelf-warn' : ''}">${item.shelf_life_pct || '-'}</strong></div>
+          <div><span>Stock:</span> <strong>${item.stock_in_hand || '-'}</strong></div>
+          <div><span>Brand:</span> <strong>${item.brand || '-'}</strong></div>
+        </div>
+        <div class="actions"><button class="del-btn" onclick="deleteItem(${item.id})">Delete</button></div>
+      </div>
+    `).join('');
+  } catch (err) {
+    list.innerHTML = '<div class="empty">Failed to load</div>';
+  }
+}
+
+async function deleteItem(id) {
+  if (!confirm('Delete this item?')) return;
+  await fetch('/api/inventory/' + id, {method: 'DELETE'});
+  loadInventory();
+}
+
+// --- Live camera & auto-capture ---
+
+async function startLiveCamera() {
+  try {
+    videoStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } }
+    });
+    const video = document.getElementById('video');
+    video.srcObject = videoStream;
+    document.getElementById('live-camera').style.display = 'block';
+    document.getElementById('camera-buttons').style.display = 'none';
+    document.getElementById('live-controls').style.display = 'block';
+    document.getElementById('preview').style.display = 'none';
+    sharpnessHistory = [];
+    // Wait for video to be ready, then start analysis
+    video.onloadeddata = () => {
+      analysisInterval = setInterval(analyzeFrame, ANALYSIS_INTERVAL_MS);
+    };
+  } catch (err) {
+    showToast('Camera access denied');
+  }
+}
+
+function stopLiveCamera() {
+  if (analysisInterval) { clearInterval(analysisInterval); analysisInterval = null; }
+  if (videoStream) { videoStream.getTracks().forEach(t => t.stop()); videoStream = null; }
+  document.getElementById('live-camera').style.display = 'none';
+  document.getElementById('camera-buttons').style.display = 'block';
+  document.getElementById('live-controls').style.display = 'none';
+  document.getElementById('video').srcObject = null;
+  sharpnessHistory = [];
+}
+
+function analyzeFrame() {
+  const video = document.getElementById('video');
+  const canvas = document.getElementById('analysis-canvas');
+  if (!video.videoWidth) return;
+
+  // Sample a center crop at reduced resolution for speed
+  const sampleW = 320;
+  const sampleH = 240;
+  canvas.width = sampleW;
+  canvas.height = sampleH;
+  const ctx = canvas.getContext('2d');
+
+  // Crop center 60% of the frame
+  const cropW = video.videoWidth * 0.6;
+  const cropH = video.videoHeight * 0.6;
+  const sx = (video.videoWidth - cropW) / 2;
+  const sy = (video.videoHeight - cropH) / 2;
+  ctx.drawImage(video, sx, sy, cropW, cropH, 0, 0, sampleW, sampleH);
+
+  const imageData = ctx.getImageData(0, 0, sampleW, sampleH);
+  const sharpness = computeSharpness(imageData);
+
+  // Update quality bar
+  const pct = Math.min(100, (sharpness / (SHARPNESS_THRESHOLD * 1.5)) * 100);
+  const fill = document.getElementById('quality-fill');
+  const label = document.getElementById('quality-label');
+  fill.style.width = pct + '%';
+
+  if (sharpness < SHARPNESS_THRESHOLD * 0.5) {
+    fill.style.background = '#d93025';
+    label.textContent = 'Searching for label...';
+  } else if (sharpness < SHARPNESS_THRESHOLD) {
+    fill.style.background = '#fbbc04';
+    label.textContent = 'Hold steady...';
+  } else {
+    fill.style.background = '#34a853';
+    label.textContent = 'Good — capturing soon...';
+  }
+
+  // Track consecutive good frames
+  if (sharpness >= SHARPNESS_THRESHOLD) {
+    sharpnessHistory.push(sharpness);
+  } else {
+    sharpnessHistory = [];
+  }
+
+  if (sharpnessHistory.length >= STABLE_FRAMES_NEEDED) {
+    autoCapture();
+  }
+}
+
+function computeSharpness(imageData) {
+  // Laplacian variance — measures edge intensity / focus quality
+  const d = imageData.data;
+  const w = imageData.width;
+  const h = imageData.height;
+
+  // Convert to grayscale
+  const gray = new Float32Array(w * h);
+  for (let i = 0; i < w * h; i++) {
+    const idx = i * 4;
+    gray[i] = 0.299 * d[idx] + 0.587 * d[idx+1] + 0.114 * d[idx+2];
+  }
+
+  // Apply Laplacian kernel and compute variance
+  let sum = 0, sumSq = 0, count = 0;
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      const lap = -4 * gray[y*w+x]
+        + gray[(y-1)*w+x] + gray[(y+1)*w+x]
+        + gray[y*w+(x-1)] + gray[y*w+(x+1)];
+      sum += lap;
+      sumSq += lap * lap;
+      count++;
+    }
+  }
+  const mean = sum / count;
+  return (sumSq / count) - (mean * mean); // variance
+}
+
+function autoCapture() {
+  clearInterval(analysisInterval);
+  analysisInterval = null;
+
+  // Flash effect
+  const flash = document.getElementById('auto-capture-flash');
+  flash.style.display = 'block';
+  setTimeout(() => flash.style.display = 'none', 200);
+
+  snapFromVideo();
+}
+
+function manualSnap() {
+  if (analysisInterval) { clearInterval(analysisInterval); analysisInterval = null; }
+  snapFromVideo();
+}
+
+function snapFromVideo() {
+  const video = document.getElementById('video');
+  const canvas = document.createElement('canvas');
+  // Full resolution from camera
+  let w = video.videoWidth, h = video.videoHeight;
+  canvas.width = w; canvas.height = h;
+  canvas.getContext('2d').drawImage(video, 0, 0, w, h);
+  let dataUrl = canvas.toDataURL('image/jpeg', 0.95);
+
+  const img = document.getElementById('preview');
+  img.src = dataUrl;
+  img.style.display = 'block';
+  currentImageB64 = dataUrl;
+
+  stopLiveCamera();
+  extractLabel(dataUrl);
+}
+
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.style.display = 'block';
+  setTimeout(() => t.style.display = 'none', 2500);
+}
+</script>
+</body>
+</html>
