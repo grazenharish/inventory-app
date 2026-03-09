@@ -4,3 +4,4 @@ __pycache__/
 .env
 inventory.db
 .vercel
+app_local.py
