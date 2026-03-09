@@ -2,7 +2,7 @@ import os
 import json
 from datetime import datetime, date
 from pathlib import Path
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, request, jsonify
 import anthropic
 from supabase import create_client
 
@@ -16,7 +16,7 @@ if env_path.exists():
             val = val.strip().strip('"').strip("'")
             os.environ.setdefault(key.strip(), val)
 
-app = Flask(__name__, template_folder=str(Path(__file__).parent.parent / "templates"))
+app = Flask(__name__)
 
 COLUMNS = [
     "location", "state", "type", "location_code", "brand", "pack", "sku",
@@ -34,11 +34,6 @@ def get_supabase():
     if not url or not key:
         raise RuntimeError("SUPABASE_URL and SUPABASE_KEY must be set")
     return create_client(url, key)
-
-
-@app.route("/")
-def index():
-    return render_template("index.html")
 
 
 @app.route("/api/extract", methods=["POST"])
